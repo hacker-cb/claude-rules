@@ -6,16 +6,13 @@ Personal Claude Code configuration under version control — global `rules/`,
 
 ## Working on this repo
 
-- **Git policy** — commit straight to `master`; no branches, no PRs; never commit
-  or push until explicitly asked. See
-  [.claude/rules/git-policy.md](.claude/rules/git-policy.md).
 - **Skills** live in `skills/<name>/SKILL.md` with YAML frontmatter (`name`,
   `description`). The `description` is what makes a skill trigger, so keep it
   precise. Frontmatter must be valid YAML: if a `description` contains a
   colon-space (`: `) or quotes, wrap the value in a folded block scalar (`>-`)
   so GitHub's strict parser doesn't reject it.
-- **Rules** — `rules/` applies to every project; `.claude/rules/` is scoped to
-  this repo only.
+- **Rules** — everything in `rules/` applies to every project. A rule that should
+  only govern work on this repo goes in `.claude/rules/` instead.
 - After changing tracked files, `./install.sh` (re)links `rules/`, `skills/`,
   and `commands/` into `~/.claude` (safe to re-run; backs up anything replaced).
 
