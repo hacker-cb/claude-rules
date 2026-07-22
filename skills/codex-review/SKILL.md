@@ -25,9 +25,12 @@ Review against a base ref. `--base` diffs `merge-base(base, HEAD)` against the
 edits to tracked files. First hit wins:
 
 1. A base the caller named explicitly.
-2. The base of the open PR for this branch:
+2. The base of the open PR for this branch. It answers with a bare branch name,
+   so pair it with whichever remote actually carries that branch — in a fork
+   checkout `origin/<branch>` is your own stale copy and `upstream/<branch>` is
+   the real base:
    ```bash
-   gh pr view --json baseRefName -q .baseRefName    # prefix the result with origin/
+   gh pr view --json baseRefName -q .baseRefName
    ```
 3. Where this repo's PRs actually land. A review usually runs *before* the PR
    exists, so step 2 comes back empty and the default branch is the wrong guess
