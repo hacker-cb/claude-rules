@@ -14,11 +14,16 @@ Three different engines; each finds what the others miss. Run all three every
 time, never silently skip one. Start the two background ones first so they overlap
 with the inline pass:
 
-1. `codex-review` skill — tell it this is a ship pipeline, so it backgrounds the
-   companion call instead of blocking.
+1. `codex-review` skill — tell it this is a ship pipeline, so it runs the Codex
+   call in the background instead of blocking.
 2. `Workflow({ name: "code-review", args: "high" })` — returns immediately, the
    fleet runs detached.
 3. `security-review` skill — runs inline in your own context, so it starts last.
+
+All three read the branch through `git diff`, so **none of them sees untracked
+files**. If `git ls-files --others --exclude-standard` lists anything that
+belongs to this change, say so before reviewing and offer `git add -N` — a review
+that silently skips the new files is worse than no review.
 
 Then wait for all three and consolidate. Dedup across reports by `(file, line)`
 *and* by mechanism — the engines often anchor one root cause at different lines —

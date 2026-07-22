@@ -1,55 +1,114 @@
 ---
 name: codex-review
 description: >-
-  Run a Codex native code review on the current git state, model-invocable. Use when a ship/PR pipeline or the user asks for a "codex review" / "/codex:review" and the gated `/codex:review` slash command cannot be invoked programmatically (it carries `disable-model-invocation`). Review-only — returns Codex's findings verbatim and never fixes anything. Invoke deliberately (when a pipeline or the user calls for it), not as an auto-trigger on every change.
+  Run a code review with Codex — OpenAI's coding agent — over the current
+  branch, using its own non-interactive reviewer (`codex exec review`). Use when
+  the user or a pipeline asks for a "codex review", or wants a second opinion on
+  a change from an engine other than Claude. Review-only: returns Codex's
+  findings verbatim and never fixes anything. Invoke deliberately, when asked —
+  not as an auto-trigger on every change.
 ---
 
-# Codex review (model-invocable)
+# Codex review
 
-Runs Codex's built-in reviewer directly. The `disable-model-invocation: true` flag lives only on the plugin's `/codex:review` slash command (the Skill-tool path); the underlying work is a plain `node` call you run via Bash, which has no such gate. This is the exact engine `/codex:review` uses — review-only, native reviewer.
+`codex exec review` is Codex's built-in reviewer, running non-interactively in a
+read-only sandbox. It needs `codex` on `PATH` and a live `codex login`; nothing
+else.
 
-For custom focus / adversarial framing, use the plugin's own `/codex:adversarial-review` instead (this skill maps to the plain native reviewer, which rejects focus text).
+This skill is **review-only**. Never fix what it reports — return the findings
+and let the caller decide.
 
-## 1. Resolve the companion (version-agnostic)
+## 1. Pick the base
 
-Glob the latest installed plugin version so this survives a codex-plugin upgrade — never hardcode the version directory:
+Review against a base ref. `--base` diffs `merge-base(base, HEAD)` against the
+**working tree**, so a single pass covers the branch's commits *and* uncommitted
+edits to tracked files. First hit wins:
+
+1. A base the caller named explicitly.
+2. The base of the open PR for this branch:
+   ```bash
+   gh pr view --json baseRefName -q .baseRefName    # prefix the result with origin/
+   ```
+3. Where this repo's PRs actually land. A review usually runs *before* the PR
+   exists, so step 2 comes back empty and the default branch is the wrong guess
+   in any repo whose PRs target `dev`, `develop`, `release/*`… Look, don't
+   assume:
+   ```bash
+   gh pr list --state merged --limit 10 --json baseRefName -q '.[].baseRefName' | sort | uniq -c
+   ```
+   If one non-default base dominates, use it and name it in the report.
+4. The repo default branch — `git symbolic-ref --short refs/remotes/origin/HEAD`,
+   else whichever of `origin/main`, `origin/master`, `main`, `master` exists.
+5. `git rev-parse --abbrev-ref @{upstream}` — last resort. When the branch tracks
+   its own remote counterpart, this narrows the review to unpushed commits only.
+
+Being on the default branch is fine: the merge-base collapses to `HEAD`, and the
+review becomes the working-tree diff.
+
+If nothing resolves — no remote, no upstream — say so and swap `--base "$BASE"`
+for `--uncommitted`, which reviews staged + unstaged + untracked instead.
+
+## 2. Check for untracked files first
+
+`--base` reviews `git diff`, and `git diff` never shows untracked files, so
+brand-new files are silently invisible to the review:
 
 ```bash
-COMP="$(ls -1 ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -1)"
+git ls-files --others --exclude-standard
 ```
 
-## 2. Pick the scope (you decide from context; the companion auto-resolves when you pass nothing)
+If that lists anything belonging to the change, say so up front and offer
+`git add -N <file>`, which makes them visible without staging their contents.
+Don't run it yourself — touching the index is the user's call.
 
-`resolveReviewTarget` in the companion already does the sensible thing, so prefer passing nothing:
+## 3. Run it
 
-- **Dirty working tree** (uncommitted changes, pre-commit review) → run with no scope args. The companion reviews the working tree (staged + unstaged + untracked).
-- **Clean tree** (reviewing a committed branch / open PR before ship) → the companion diffs against the repo's GitHub default branch (`git symbolic-ref refs/remotes/origin/HEAD`, falling back to `main`/`master`/`trunk` — note: **not** `dev`). Trust this **only when the PR targets the repo's default branch**.
-- **PR targets a non-default base** (e.g. a repo where PRs go to `dev` but the default is `master`) → resolve the real base and pass it explicitly:
-  ```bash
-  BASE="origin/$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null)"
-  # then: node "$COMP" review --base "$BASE"
-  ```
-- **Force a specific base / merge-base** → `--base <ref>`.
-
-Rule of thumb: default to no args (trust auto); add `--base` only when the auto-detected default branch is the wrong base for the change under review.
-
-## 3. Run
-
-Same command either way — only the harness wrapper changes:
+Write the report **outside the repository under review**: a file left inside
+becomes an untracked file that Codex then reads as part of the change.
 
 ```bash
-node "$COMP" review            # auto scope
-# or
-node "$COMP" review --base "$BASE"
+BASE=origin/main      # whatever the base resolution above landed on
+# A base Codex can't resolve is not an error to it — it quietly reviews against
+# some other upstream branch instead. Fetch it, or abort; never let it pick.
+have_base() { git rev-parse --verify -q "$BASE^{commit}" >/dev/null; }
+have_base || { git fetch --quiet origin "${BASE#origin/}" 2>/dev/null; have_base; } \
+  || { echo "base $BASE not found — resolve it before reviewing"; exit 1; }
+OUT="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXX")"
+codex exec review --base "$BASE" -o "$OUT" > "$OUT.log" 2>&1
+if [ -s "$OUT" ]; then cat "$OUT"; else echo "codex review failed:"; tail -20 "$OUT.log"; fi
 ```
 
-- **Foreground (default)** — run the Bash call normally and read the findings inline.
-- **Background (on request)** — when the caller asks for it (e.g. a ship pipeline running this alongside `/code-review`) or the diff is large/slow, wrap the same call in `Bash(run_in_background: true)` and collect the output when it finishes.
+`-o` captures the verdict while the full transcript goes to the log, so stdout is
+the report and nothing else. Pass `description: "Codex review"` on the `Bash`
+call so the run is recognizable in the task list.
 
-Note: the companion's own `--background` flag does **not** actually detach — only the harness `Bash(run_in_background: true)` does.
+- **Background** — asked for by a pipeline, or a diff big enough to be slow: run
+  that exact block with `Bash(run_in_background: true)`. The finished task's
+  output is already the report.
+- **Foreground** — same block, read inline.
 
-## 4. Output
+Model and reasoning effort come from `~/.codex/config.toml`; override per run
+with `-m <model>` or `-c model_reasoning_effort=high`. `--output-schema` is
+accepted but ignored in review mode — the output is always prose.
 
-Return Codex's stdout **verbatim** — do not paraphrase, summarize, or add commentary around it. This skill is **review-only**: do not fix the issues it reports (act on them separately, as the calling pipeline decides).
+## 4. Hand back the findings
 
-If the companion errors that the Codex CLI is missing or unauthenticated, tell the user to run `/codex:setup` — do not try to work around it.
+Return Codex's report **verbatim** — no paraphrase, no summary, no commentary
+around it. Its shape is a one-paragraph verdict followed by findings:
+
+```
+- [P1] Short title — /abs/path/file.js:12-14
+  Why it breaks, in concrete terms.
+```
+
+Two things to check in what comes back:
+
+- If the first line names a base other than `$BASE`, the review missed its
+  target — re-run against the right ref rather than reporting it.
+- An empty review is a normal result, not a failure: Codex exits `0` saying
+  something like "There are no staged, unstaged, or untracked code changes to
+  review."
+
+`codex: command not found` means the CLI isn't installed (`brew install codex` or
+`npm i -g @openai/codex`); an auth error means `codex login` expired. Report
+either as-is instead of working around it.
