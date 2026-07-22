@@ -6,8 +6,9 @@ description: >-
   the PR. Use it when the user says to ship, open a PR or MR, push this up, or get
   this merged; and use it unprompted the moment a piece of work is complete and
   verified and the tree is committable, since shipping is the default ending for
-  finished work. Do not use it for work still in progress, or where the user or
-  the project has said not to commit yet.
+  finished work. Do not use it for work that is still in progress. Where a
+  project forbids committing or pull requests, it still applies — it follows that
+  project's rules and names the step it is skipping.
 ---
 
 # Shipping workflow
