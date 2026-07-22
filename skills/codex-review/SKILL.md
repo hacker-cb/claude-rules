@@ -113,16 +113,18 @@ if [ -n "${BASE:-}" ]; then
   have_base() { git rev-parse --verify -q "$BASE^{commit}" >/dev/null 2>&1; }
   have_base || { git fetch --quiet "$REMOTE" "$BRANCH" 2>/dev/null; have_base; } || BASE=""
 fi
+# Positional parameters, not an interpolated string: the scope is two arguments
+# or one, and an unquoted expansion would leave that to word-splitting.
 if [ -n "${BASE:-}" ]; then
-  SCOPE="--base $BASE"
+  set -- --base "$BASE"
   COVERED=$(git diff --name-only "$(git merge-base "$BASE" HEAD)" | wc -l | tr -d ' ')
 else
-  SCOPE="--uncommitted"
+  set -- --uncommitted
   COVERED=$(git status --porcelain --untracked-files=all | wc -l | tr -d ' ')
 fi
 
 OUT="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXX")"
-codex exec review $SCOPE -c model_reasoning_effort="$EFFORT" -o "$OUT" > "$OUT.log" 2>&1
+codex exec review "$@" -c model_reasoning_effort="$EFFORT" -o "$OUT" > "$OUT.log" 2>&1
 # The scope line is what a caller compares against; without it nobody can tell
 # what this run actually looked at.
 echo "scope: ${BASE:-working tree}, $COVERED files, effort $EFFORT"
