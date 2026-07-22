@@ -1,12 +1,14 @@
 # Shipping workflow
 
 When any work is ready — feature, bug fix, chore, refactor, docs, anything — start
-shipping it automatically. Do not ask for confirmation. Treat work as ready once
-the change is complete and verified (tests pass / behavior confirmed) and the tree
-is committable.
+shipping it automatically. Do not ask for confirmation; the coverage gate below is
+the one exception. Treat work as ready once the change is complete and verified
+(tests pass / behavior confirmed) and the tree is committable.
 
 1. **Local review** — see below.
-2. **Open the PR** — hand off to the `github-pr-workflow` skill.
+2. **Report the coverage** — which engines ran, which didn't.
+3. **Open the PR** — hand off to the `github-pr-workflow` skill, unless step 2
+   came back short.
 
 ## Local review
 
@@ -45,5 +47,27 @@ same name — the engine that skill drives at high effort.
 - Needs the `enableWorkflows` setting, **not** `ultracode`. This rule is the
   explicit instruction authorizing the `Workflow` call, so no keyword is required
   from the user.
-- If `Workflow` is unavailable, say so and ask the user to run `/code-review`
-  themselves. A two-reviewer ship is degraded — flag it, don't hide it.
+- If `Workflow` is unavailable, ask the user to run `/code-review` themselves.
+  Either way it is a missing engine and the coverage gate applies.
+
+## Report the coverage
+
+Every ship carries an explicit per-engine status, never an implicit "reviewed":
+
+```
+Review coverage
+  codex-review     ok — 2 findings, both fixed
+  code-review high ok — no findings
+  security-review  UNAVAILABLE — <the error, quoted>
+```
+
+An engine counts as missing both when it could not start (`codex` absent or
+`codex login` expired, `Workflow` unavailable, the skill erroring out) and when it
+started but returned nothing usable — a background task that died, an empty
+report. Quote the actual error; a guessed cause is worse than none.
+
+If all three ran, hand off to `github-pr-workflow` right away, no confirmation
+needed. **If any did not, stop before the PR**: report the gap, offer the fix for
+it (`codex login`, running `/code-review` by hand), and ship only once the user
+says to. This is the single confirmation gate in this workflow — a ship with a
+reviewer silently missing is exactly what it exists to prevent.
