@@ -67,6 +67,13 @@ Write the report **outside the repository under review**: a file left inside
 becomes an untracked file that Codex then reads as part of the change.
 
 ```bash
+# Preflight. Without it an unauthenticated run burns five reconnect attempts
+# before dying on a 401 dump — useless as a background task's output.
+command -v codex >/dev/null \
+  || { echo "codex CLI not installed — brew install codex (or npm i -g @openai/codex)"; exit 1; }
+codex login status >/dev/null 2>&1 \
+  || { echo "codex is not authenticated — run: codex login"; exit 1; }
+
 BASE=origin/main      # whatever the base resolution above landed on
 # A base Codex can't resolve is not an error to it — it quietly reviews against
 # some other upstream branch instead. Fetch it, or abort; never let it pick.
@@ -109,6 +116,6 @@ Two things to check in what comes back:
   something like "There are no staged, unstaged, or untracked code changes to
   review."
 
-`codex: command not found` means the CLI isn't installed (`brew install codex` or
-`npm i -g @openai/codex`); an auth error means `codex login` expired. Report
-either as-is instead of working around it.
+If the preflight stopped the run, the output is a one-line install or `codex
+login` instruction — pass it through as the result. Same for anything else Codex
+refuses on: report it as-is rather than working around it.
