@@ -1,6 +1,7 @@
 ---
 name: codex-review
-description: Run a Codex native code review on the current git state, model-invocable. Use when a ship/PR pipeline or the user asks for a "codex review" / "/codex:review" and the gated `/codex:review` slash command cannot be invoked programmatically (it carries `disable-model-invocation`). Review-only — returns Codex's findings verbatim and never fixes anything. Invoke deliberately (when a pipeline or the user calls for it), not as an auto-trigger on every change.
+description: >-
+  Run a Codex native code review on the current git state, model-invocable. Use when a ship/PR pipeline or the user asks for a "codex review" / "/codex:review" and the gated `/codex:review` slash command cannot be invoked programmatically (it carries `disable-model-invocation`). Review-only — returns Codex's findings verbatim and never fixes anything. Invoke deliberately (when a pipeline or the user calls for it), not as an auto-trigger on every change.
 ---
 
 # Codex review (model-invocable)
