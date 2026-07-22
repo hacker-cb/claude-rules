@@ -45,8 +45,9 @@ edits to tracked files. First hit wins:
 Being on the default branch is fine: the merge-base collapses to `HEAD`, and the
 review becomes the working-tree diff.
 
-If nothing resolves — no remote, no upstream — say so and swap `--base "$BASE"`
-for `--uncommitted`, which reviews staged + unstaged + untracked instead.
+If nothing resolves — no remote, no upstream — the run block drops to
+`--uncommitted`, reviewing staged + unstaged + untracked instead, and says so in
+its scope line. Read that line: a working-tree review covers no committed work.
 
 ## 2. Check for untracked files first
 
@@ -69,12 +70,13 @@ becomes an untracked file that Codex then reads as part of the change.
 ```bash
 command -v codex >/dev/null \
   || { echo "codex CLI not installed — brew install codex (or npm i -g @openai/codex)"; exit 1; }
-# ~20 ms, purely local. Only a definite "not logged in" (rc 1) stops the run: if
-# the check times out or misfires, go ahead — the 401 branch below still catches
-# it. `timeout` is optional because stock macOS has no coreutils.
+# ~20 ms, purely local. Match the message, not the exit code: `codex login status`
+# also exits 1 on failures that logging in again would not fix, and only the
+# stated "not logged in" is worth stopping for. `timeout` is optional because
+# stock macOS ships no coreutils.
 command -v timeout >/dev/null && TO="timeout 5" || TO=""
-$TO codex login status >/dev/null 2>&1; rc=$?
-if [ "$rc" -eq 1 ]; then echo "codex is not authenticated — run: codex login"; exit 1; fi
+$TO codex login status 2>&1 | grep -qi 'not logged in' \
+  && { echo "codex is not authenticated — run: codex login"; exit 1; }
 git rev-parse --git-dir >/dev/null 2>&1 \
   || { echo "not a git repository — nothing to review here"; exit 1; }
 
@@ -83,7 +85,13 @@ git rev-parse --git-dir >/dev/null 2>&1 \
 # repo's PRs actually land, is a judgment call and stays yours to make first.
 if [ -z "${BASE:-}" ]; then
   b="$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null)"
-  [ -n "$b" ] && BASE="origin/$b"
+  # A PR names a branch, not a remote. In a fork checkout `origin/$b` is your own
+  # stale copy and `upstream/$b` is the real base, so take the first ref that
+  # exists rather than assuming a prefix.
+  for r in upstream origin; do
+    [ -n "$b" ] && git rev-parse --verify -q "$r/$b^{commit}" >/dev/null 2>&1 \
+      && { BASE="$r/$b"; break; }
+  done
 fi
 BASE="${BASE:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)}"
 # origin/HEAD only exists in a clone; a repo built with `git init` + `git remote
@@ -94,24 +102,31 @@ if [ -z "${BASE:-}" ]; then
   done
 fi
 BASE="${BASE:-$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)}"
-[ -n "$BASE" ] || { echo "no base resolved — name one, or review --uncommitted"; exit 1; }
 EFFORT="${EFFORT:-high}"   # always explicit — never inherit the machine's config
+
 # A base Codex can't resolve is not an error to it — it quietly reviews against
-# some other upstream branch instead. Fetch it, or abort; never let it pick.
-have_base() { git rev-parse --verify -q "$BASE^{commit}" >/dev/null; }
-have_base || { git fetch --quiet origin "${BASE#origin/}" 2>/dev/null; have_base; } \
-  || { echo "base $BASE not found — resolve it before reviewing"; exit 1; }
-OUT="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXX")"
-codex exec review --base "$BASE" -c model_reasoning_effort="$EFFORT" -o "$OUT" > "$OUT.log" 2>&1
-if [ -s "$OUT" ]; then
-  cat "$OUT"
-elif grep -qiE '401|unauthorized|missing bearer|not logged in' "$OUT.log"; then
-  # An unauthenticated run does not fail fast: it retries five times, then dumps
-  # the 401. Say the one thing that fixes it instead of pasting the transcript.
-  echo "codex is not authenticated — run: codex login"
-else
-  echo "codex review failed:"; tail -20 "$OUT.log"
+# some other upstream branch. Fetch it from its own remote, and if it still will
+# not resolve, drop to the working tree as §1 says; never let Codex pick.
+if [ -n "${BASE:-}" ]; then
+  case "$BASE" in */*) REMOTE="${BASE%%/*}"; BRANCH="${BASE#*/}" ;;
+                    *) REMOTE=origin;        BRANCH="$BASE"      ;; esac
+  have_base() { git rev-parse --verify -q "$BASE^{commit}" >/dev/null 2>&1; }
+  have_base || { git fetch --quiet "$REMOTE" "$BRANCH" 2>/dev/null; have_base; } || BASE=""
 fi
+if [ -n "${BASE:-}" ]; then
+  SCOPE="--base $BASE"
+  COVERED=$(git diff --name-only "$(git merge-base "$BASE" HEAD)" | wc -l | tr -d ' ')
+else
+  SCOPE="--uncommitted"
+  COVERED=$(git status --porcelain --untracked-files=all | wc -l | tr -d ' ')
+fi
+
+OUT="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXX")"
+codex exec review $SCOPE -c model_reasoning_effort="$EFFORT" -o "$OUT" > "$OUT.log" 2>&1
+# The scope line is what a caller compares against; without it nobody can tell
+# what this run actually looked at.
+echo "scope: ${BASE:-working tree}, $COVERED files, effort $EFFORT"
+if [ -s "$OUT" ]; then cat "$OUT"; else echo "codex review failed:"; tail -20 "$OUT.log"; fi
 ```
 
 `-o` captures the verdict while the full transcript goes to the log, so stdout is
@@ -134,8 +149,11 @@ review mode — the output is always prose.
 
 ## 4. Hand back the findings
 
-Return Codex's report **verbatim** — no paraphrase, no summary, no commentary
-around it. Its shape is a one-paragraph verdict followed by findings:
+The block prints a `scope:` line — base, file count, effort — and then Codex's
+report. Pass the scope line on as the coverage record; it is the only statement
+of what this run actually looked at. Return the report itself **verbatim** — no
+paraphrase, no summary, no commentary around it. Its shape is a one-paragraph
+verdict followed by findings:
 
 ```
 - [P1] Short title — /abs/path/file.js:12-14
@@ -144,12 +162,15 @@ around it. Its shape is a one-paragraph verdict followed by findings:
 
 Two things to check in what comes back:
 
-- If the first line names a base other than `$BASE`, the review missed its
-  target — re-run against the right ref rather than reporting it.
+- If Codex's own first line names a base other than the one in the `scope:` line,
+  the review missed its target — re-run against the right ref rather than
+  reporting it.
+- A scope line reading `0 files` means nothing was reviewed. Report that as
+  coverage of zero, never as a clean review.
 - An empty review is a normal result, not a failure: Codex exits `0` saying
   something like "There are no staged, unstaged, or untracked code changes to
   review."
 
-When the run block stops early, its output is a single line — a missing CLI, an
-expired login, an unresolvable base. Pass that line through as the result. Same
-for anything else Codex refuses on: report it as-is rather than working around it.
+When the run block stops early — no CLI, no login, not a git repository — its
+output is a single line. Pass that line through as the result. Same for anything
+else Codex refuses on: report it as-is rather than working around it.

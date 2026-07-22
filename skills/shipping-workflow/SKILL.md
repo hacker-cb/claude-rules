@@ -16,19 +16,24 @@ Finished work ships automatically. Do not ask for confirmation; the coverage gat
 below is the one exception. Work counts as ready once the change is complete and
 verified — tests pass, or the behavior is confirmed — and the tree is committable.
 
-1. **Local review** — hand off to the `multi-review` skill.
-2. **Apply the fixes** — that skill reports, it does not fix. Skip a finding only
+1. **Commit the change first**, new files included — one reviewer reads only
+   committed work, so a review launched over a dirty tree covers less than the
+   change and trips the gate below on every ship. Where the project forbids
+   committing yet, say so and expect that reviewer to come back short.
+2. **Local review** — hand off to the `multi-review` skill.
+3. **Apply the fixes** — that skill reports, it does not fix. Skip a finding only
    if the fix would change intended behavior, reach well outside the diff, or the
    finding is plainly wrong, and note the skip in one line. Do not open the PR
    with findings left unresolved.
-3. **Check the coverage** — the gate below.
-4. **Open the PR** — hand off to the `github-pr-workflow` skill.
+4. **Check the coverage** — the gate below.
+5. **Open the PR** — hand off to the `github-pr-workflow` skill.
 
 ## The coverage gate
 
-The review reports what each reviewer actually covered, and separates a gap — a
-reviewer that could not run, or one that ran and covered nothing — from a
-deliberate skip with a stated reason. Only gaps matter here.
+The review reports what each reviewer actually covered. A gap is a reviewer that
+could not run, one that ran and covered nothing, and one that covered less than
+the change or the wrong range — a nonzero file count is not proof it read *this*
+change. Only a deliberate skip with a stated reason is not a gap.
 
 With no gaps, go straight to the PR; no confirmation needed. **With a gap, stop
 before the PR.** Report it, pass on whatever the review says would close it, and
