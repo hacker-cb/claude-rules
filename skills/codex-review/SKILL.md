@@ -67,22 +67,51 @@ Write the report **outside the repository under review**: a file left inside
 becomes an untracked file that Codex then reads as part of the change.
 
 ```bash
-# Preflight. Without it an unauthenticated run burns five reconnect attempts
-# before dying on a 401 dump — useless as a background task's output.
 command -v codex >/dev/null \
   || { echo "codex CLI not installed — brew install codex (or npm i -g @openai/codex)"; exit 1; }
-codex login status >/dev/null 2>&1 \
-  || { echo "codex is not authenticated — run: codex login"; exit 1; }
+# ~20 ms, purely local. Only a definite "not logged in" (rc 1) stops the run: if
+# the check times out or misfires, go ahead — the 401 branch below still catches
+# it. `timeout` is optional because stock macOS has no coreutils.
+command -v timeout >/dev/null && TO="timeout 5" || TO=""
+$TO codex login status >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 1 ]; then echo "codex is not authenticated — run: codex login"; exit 1; fi
+git rev-parse --git-dir >/dev/null 2>&1 \
+  || { echo "not a git repository — nothing to review here"; exit 1; }
 
-BASE=origin/main      # whatever the base resolution above landed on
+# BASE and EFFORT may be handed in by the caller. Anything still unset falls back
+# to the mechanical half of the resolution above — step 3, reading where this
+# repo's PRs actually land, is a judgment call and stays yours to make first.
+if [ -z "${BASE:-}" ]; then
+  b="$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null)"
+  [ -n "$b" ] && BASE="origin/$b"
+fi
+BASE="${BASE:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)}"
+# origin/HEAD only exists in a clone; a repo built with `git init` + `git remote
+# add` has none, so fall back to the usual names before giving up.
+if [ -z "${BASE:-}" ]; then
+  for c in origin/main origin/master main master; do
+    git rev-parse --verify -q "$c^{commit}" >/dev/null 2>&1 && { BASE="$c"; break; }
+  done
+fi
+BASE="${BASE:-$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)}"
+[ -n "$BASE" ] || { echo "no base resolved — name one, or review --uncommitted"; exit 1; }
+EFFORT="${EFFORT:-high}"   # always explicit — never inherit the machine's config
 # A base Codex can't resolve is not an error to it — it quietly reviews against
 # some other upstream branch instead. Fetch it, or abort; never let it pick.
 have_base() { git rev-parse --verify -q "$BASE^{commit}" >/dev/null; }
 have_base || { git fetch --quiet origin "${BASE#origin/}" 2>/dev/null; have_base; } \
   || { echo "base $BASE not found — resolve it before reviewing"; exit 1; }
 OUT="$(mktemp "${TMPDIR:-/tmp}/codex-review.XXXXXX")"
-codex exec review --base "$BASE" -o "$OUT" > "$OUT.log" 2>&1
-if [ -s "$OUT" ]; then cat "$OUT"; else echo "codex review failed:"; tail -20 "$OUT.log"; fi
+codex exec review --base "$BASE" -c model_reasoning_effort="$EFFORT" -o "$OUT" > "$OUT.log" 2>&1
+if [ -s "$OUT" ]; then
+  cat "$OUT"
+elif grep -qiE '401|unauthorized|missing bearer|not logged in' "$OUT.log"; then
+  # An unauthenticated run does not fail fast: it retries five times, then dumps
+  # the 401. Say the one thing that fixes it instead of pasting the transcript.
+  echo "codex is not authenticated — run: codex login"
+else
+  echo "codex review failed:"; tail -20 "$OUT.log"
+fi
 ```
 
 `-o` captures the verdict while the full transcript goes to the log, so stdout is
@@ -94,9 +123,14 @@ call so the run is recognizable in the task list.
   output is already the report.
 - **Foreground** — same block, read inline.
 
-Model and reasoning effort come from `~/.codex/config.toml`; override per run
-with `-m <model>` or `-c model_reasoning_effort=high`. `--output-schema` is
-accepted but ignored in review mode — the output is always prose.
+A caller — a person or another skill — may hand you the base and the effort
+level; both are meant to be passed in, and an explicit base wins over the
+resolution above. Set the effort on every run rather than letting
+`~/.codex/config.toml` decide, since that file differs from machine to machine.
+The ladder is `minimal`, `low`, `medium`, `high`, `xhigh`; an unknown value is
+rejected outright, so a typo cannot silently downgrade a review. `-m <model>`
+overrides the model the same way. `--output-schema` is accepted but ignored in
+review mode — the output is always prose.
 
 ## 4. Hand back the findings
 
@@ -116,6 +150,6 @@ Two things to check in what comes back:
   something like "There are no staged, unstaged, or untracked code changes to
   review."
 
-If the preflight stopped the run, the output is a one-line install or `codex
-login` instruction — pass it through as the result. Same for anything else Codex
-refuses on: report it as-is rather than working around it.
+When the run block stops early, its output is a single line — a missing CLI, an
+expired login, an unresolvable base. Pass that line through as the result. Same
+for anything else Codex refuses on: report it as-is rather than working around it.
