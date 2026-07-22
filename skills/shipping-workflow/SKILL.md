@@ -26,7 +26,11 @@ verified — tests pass, or the behavior is confirmed — and the tree is commit
    finding is plainly wrong, and note the skip in one line. Do not open the PR
    with findings left unresolved.
 4. **Check the coverage** — the gate below.
-5. **Open the PR** — hand off to the `github-pr-workflow` skill.
+5. **Open the PR** — hand off to a skill that drives pull requests if this machine
+   has one; it usually arrives from a plugin and is invoked under that plugin's
+   namespace rather than a bare name. If none is installed, open the PR yourself
+   with `gh pr create` and say the handoff was unavailable, so nobody assumes a
+   review-and-merge loop is running that isn't.
 
 ## The coverage gate
 
