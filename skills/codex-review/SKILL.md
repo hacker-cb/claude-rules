@@ -111,7 +111,13 @@ if [ -n "${BASE:-}" ]; then
   case "$BASE" in */*) REMOTE="${BASE%%/*}"; BRANCH="${BASE#*/}" ;;
                     *) REMOTE=origin;        BRANCH="$BASE"      ;; esac
   have_base() { git rev-parse --verify -q "$BASE^{commit}" >/dev/null 2>&1; }
-  have_base || { git fetch --quiet "$REMOTE" "$BRANCH" 2>/dev/null; have_base; } || BASE=""
+  # A bare name may exist only as a remote-tracking ref: `git fetch origin main`
+  # updates `origin/main` and never creates a local `main`, so try the remote
+  # form before concluding there is no base and silently narrowing the review.
+  have_base \
+    || { git fetch --quiet "$REMOTE" "$BRANCH" 2>/dev/null; have_base; } \
+    || { BASE="$REMOTE/$BRANCH"; have_base; } \
+    || BASE=""
 fi
 # Positional parameters, not an interpolated string: the scope is two arguments
 # or one, and an unquoted expansion would leave that to word-splitting.
