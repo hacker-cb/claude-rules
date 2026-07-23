@@ -1,23 +1,23 @@
 ---
 name: seeding-gitignore
 description: >-
-  Use when creating a new `.gitignore`, editing an existing one, initializing a new repo (`git init`), or whenever a write to a file named `.gitignore` at any depth is about to happen. Also use when the user asks to ignore `.DS_Store`, Claude Code local files, Superpowers artifacts, AgentsRoom (Agentsroom AI) project state, git worktrees, or any OS-level noise. Provides the canonical baseline every project of this user carries: OS files, editor swap, Claude Code per-developer files (`.claude/settings.local.json`, `CLAUDE.local.md`, `.claude/scheduled_tasks.lock`) while keeping team-shared `.claude/` config committed, Superpowers per-session artifacts (`.superpowers/`), AgentsRoom per-project state (`.agentsroom/`), and git worktrees from both the Superpowers skill (`.worktrees/`) and Claude Code's native `/worktree` (`.claude/worktrees/`). Apply unconditionally regardless of language or framework; language-specific patterns (`node_modules`, `target/`, `__pycache__`) come from the language's own tooling and are out of scope. Never ignore `docs/superpowers/` — its `specs/` and `plans/` files are committed.
+  Use whenever a `.gitignore` at any depth is created or edited, when a repo is initialized (`git init`), and before every commit — check what is about to be staged and ignore local artifacts instead of committing them. Also use when the user asks to ignore `.DS_Store`, Claude Code local files, Superpowers artifacts, AgentsRoom (Agentsroom AI) project state, git worktrees, or any OS-level noise. Provides the canonical baseline every project of this user carries — OS noise, editor swap files, per-developer Claude Code files (`.claude/settings.local.json`, `CLAUDE.local.md`) while the rest of `.claude/` stays committed, local agent-tooling state (`.superpowers/`, `.agentsroom/`), and git worktree directories (`.worktrees/`, `.claude/worktrees/`). Apply unconditionally regardless of language or framework; language-specific patterns are chosen separately, from what the project actually uses.
 ---
 
-# Seeding `.gitignore` with the canonical baseline
+# Seeding `.gitignore`
 
-## Scope
+Two parts: a fixed baseline that every repo of this user carries, and
+language-specific patterns derived from the project itself.
 
-A baseline of `.gitignore` entries every repo of this user carries, regardless of language, framework, or layout. Four buckets that always apply:
+## Before a commit
 
-1. **OS noise** — macOS metadata, Windows thumbnails, recycle bins.
-2. **Editor scratch** — vim swap, generic backup files.
-3. **Claude Code per-developer files** — `settings.local.json`, `CLAUDE.local.md`, plugin lock state. Team-shared `.claude/` config (`settings.json`, `agents/`, `commands/`, `hooks/`, `rules/`, `skills/`, `agent-memory/`) stays committed.
-4. **Workflow tooling** — Superpowers per-session brainstorming under `.superpowers/`, AgentsRoom project state under `.agentsroom/`, and git worktrees in two locations: `.worktrees/` (Superpowers `using-git-worktrees` skill default) and `.claude/worktrees/` (Claude Code native `/worktree` default). Both worktree paths are covered because both mechanisms are in use. The planning files at `docs/superpowers/specs/` and `docs/superpowers/plans/` are **committed**, not ignored — they are project planning records, not local state.
+Look at what is about to be staged (`git status --short`). If it contains local
+artifacts — anything from the baseline below, build output, caches, editor or OS
+noise — do not commit them: add the pattern to `.gitignore` first. A file already
+tracked stays tracked after the pattern is added; untrack it with
+`git rm --cached <path>` in the same commit.
 
-When seeding, ensure all four buckets are present. If the file already exists, **add only what is missing** — never reorder, rewrite, or wholesale-replace an existing file. If the file follows a third-party / vendor convention, skip this skill and follow that convention.
-
-## The canonical baseline
+## Part 1 — the baseline (always, verbatim)
 
 ```gitignore
 # --- OS ---
@@ -36,74 +36,68 @@ $RECYCLE.BIN/
 *.swo
 *~
 
-# --- Claude Code: per-developer files ---
-# Committed: .claude/settings.json, .claude/agents/, .claude/commands/,
-#            .claude/hooks/, .claude/rules/, .claude/skills/,
-#            .claude/agent-memory/, CLAUDE.md, .mcp.json, .worktreeinclude
+# --- Claude Code: per-developer files only ---
+# Everything else under .claude/ is committed.
+CLAUDE.local.md
 .claude/settings.local.json
 .claude/*.local.json
-CLAUDE.local.md
-# Lock from the /schedule and /loop plugins; harmless if those are unused.
+.claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
 
-# --- Superpowers per-session artifacts ---
-# Sibling docs/superpowers/{specs,plans}/ is COMMITTED — never list it here.
+# --- Local agent-tooling state ---
 .superpowers/
-
-# --- AgentsRoom (Agentsroom AI) project state ---
 .agentsroom/
 
 # --- Git worktrees ---
-# .worktrees/         — Superpowers `using-git-worktrees` skill default
-# .claude/worktrees/  — Claude Code native `/worktree` default (overridable via WorktreeCreate hook)
 .worktrees/
 .claude/worktrees/
 ```
 
-## Committed vs ignored
+What each ignored entry is, so nothing gets over- or under-matched:
 
-The Claude Code and Superpowers buckets are **selective ignore**, not blanket ignore. Team-shared files belong in git so collaborators (and future-you on another machine) get the same setup.
+- `CLAUDE.local.md` — personal project memory. Nothing auto-ignores it; this
+  line is the only barrier.
+- `.claude/settings.local.json`, `.claude/*.local.json` — personal setting
+  overrides. Claude Code adds the first one to the machine's global git ignore
+  when it creates the file, but the repo needs its own rule so it travels.
+- `.claude/scheduled_tasks.json`, `.claude/scheduled_tasks.lock` — schedule
+  state and its lock, written by the `/schedule` and `/loop` plugins. Per-machine
+  (the tasks run on whoever's box created them), so both stay out of git;
+  harmless if those plugins are unused.
+- `.superpowers/` — Superpowers per-session artifacts.
+- `.agentsroom/` — AgentsRoom (Agentsroom AI) per-project state.
+- `.worktrees/`, `.claude/worktrees/` — checkouts of the repo inside itself,
+  never committed. Two paths because two mechanisms create them: the Superpowers
+  `using-git-worktrees` skill defaults to the first, Claude Code's native
+  `/worktree` to the second. List both.
 
-| Committed (do not ignore) | Ignored (per-developer / per-session) |
-|---|---|
-| `CLAUDE.md` | `CLAUDE.local.md` |
-| `.mcp.json` | `.claude/settings.local.json` |
-| `.worktreeinclude` | `.claude/*.local.json` |
-| `.claude/settings.json` | `.claude/scheduled_tasks.lock` |
-| `.claude/agents/` | `.superpowers/` |
-| `.claude/commands/` | `.agentsroom/` |
-| `.claude/hooks/` | `.worktrees/` (Superpowers skill default) |
-| `.claude/rules/` | `.claude/worktrees/` (Claude Code native `/worktree` default) |
-| `.claude/skills/` | OS / editor noise (see baseline) |
-| `.claude/agent-memory/` (autogen, written by subagents with `memory: project`) |  |
-| `docs/superpowers/specs/` |  |
-| `docs/superpowers/plans/` |  |
+**Everything else under `.claude/` is committed** — `settings.json`,
+`CLAUDE.md`, `rules/`, `skills/`, `commands/`, `agents/`, `hooks/`, and any
+future team-shared file. So is `.mcp.json` at the repo root. Never blanket-ignore
+`.claude/`; that setup is meant to be shared with the team and with future-you on
+another machine.
 
-## Why no `.claude/cache/`, `state/`, `logs/`, `tmp/` in the baseline
+## Part 2 — language and framework patterns
 
-Claude Code's scratch directories — caches, debug logs, paste/image caches, file history, session env — live under the user's **global** `~/.claude/`, never under the project-local `.claude/`. A project-level rule cannot fire on a path that never appears, so preempting them adds noise without benefit.
+The baseline says nothing about `node_modules/`, `target/`, `__pycache__/`,
+`dist/`, or `.venv/`. Work those out per project instead of pasting a
+one-size-fits-all list:
 
-Two related auto-ignore facts worth knowing:
+1. Look at what the repo actually contains — manifests and lockfiles
+   (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Gemfile`,
+   `*.csproj`, …), build config, framework markers.
+2. Add the ignore patterns that those tools genuinely produce: dependency
+   directories, build output, caches, coverage reports, local env files.
+3. Put them in their own section below the baseline, never mixed into it.
 
-- Claude Code appends `.claude/settings.local.json` to `~/.config/git/ignore` the first time it writes one. The project `.gitignore` entry is still required so the rule travels with the repo and applies to teammates.
-- `CLAUDE.local.md` is **not** auto-ignored anywhere. The project `.gitignore` is the only barrier.
+If unsure which patterns a stack needs, take the canonical template from
+`github/gitignore` for that language rather than inventing entries.
 
 ## Editing an existing `.gitignore`
 
-1. Read the file first. Identify which baseline buckets are present and which are missing.
-2. Add only the missing buckets. Do not reorder or rewrite existing sections.
-3. Match the existing comment style and section dividers (`# --- ... ---` if used, otherwise whatever the file already does).
-4. Keep the inline `# Committed: ...` comment in the Claude Code section when adding it — it documents the selective-ignore split for future readers.
+Read the file first, then **add only what is missing**. Never reorder, rewrite,
+or wholesale-replace an existing file, and match its comment style and section
+dividers instead of imposing the `# --- ... ---` style above.
 
-## Common mistakes
-
-| Mistake | Fix |
-|---|---|
-| Blanket-ignoring `.claude/` | Use the selective list — team-shared config (`settings.json`, `agents/`, `commands/`, `hooks/`, `rules/`, `skills/`, `agent-memory/`) must stay committed |
-| Forgetting `CLAUDE.local.md` | Claude Code does **not** auto-ignore it anywhere; the project `.gitignore` is the only barrier |
-| Covering only `.worktrees/` (or only `.claude/worktrees/`) | Both paths are in active use — Superpowers `using-git-worktrees` defaults to `.worktrees/`, Claude Code native `/worktree` defaults to `.claude/worktrees/`. List both |
-| Preemptively adding `.claude/cache/`, `.claude/state/`, `.claude/logs/`, `.claude/tmp/` | Those scratch dirs live in the user's global `~/.claude/`, never in the project — project-level rules cannot fire |
-| Ignoring `docs/superpowers/` because the path looks Superpowers-related | The `specs/` and `plans/` files there are project planning records and must be committed; only the dotted `.superpowers/` is local |
-| Adding `node_modules/`, `target/`, `dist/`, `__pycache__/` inside the baseline section | Language-specific patterns belong in their own section below; the baseline is language-agnostic |
-| Replacing an existing `.gitignore` wholesale to match the baseline | Only append what is missing; preserve existing structure and comments |
-| Skipping Windows OS entries because the developer is on macOS | Collaborators may be on Windows; keep cross-platform OS entries |
+If the file follows a third-party or vendor convention (generated, or owned by a
+framework's own tooling), skip this skill and follow that convention.
